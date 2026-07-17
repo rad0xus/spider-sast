@@ -1,0 +1,180 @@
+#!/bin/bash
+# SourcePuller v15 - dynamic scheme detection, hard time budget, real countdown
+
+usage() {
+    cat <<'USAGE'
+Usage: sourcepuller <target> -T<1-5>
+
+  -T1   2 min total   (~40 sec/phase)
+  -T2   5 min total   (~100 sec/phase)
+  -T3   10 min total  (~200 sec/phase)   [default]
+  -T4   60 min total  (~20 min/phase)
+  -T5   120 min total (~40 min/phase)
+
+The 3 phases (Feroxbuster, Katana, HTTrack) split the budget evenly.
+Each phase is hard-capped: when its slice of time runs out, it is
+stopped (SIGINT, so the tool flushes whatever it found so far) and
+the pipeline moves on immediately with whatever was collected.
+USAGE
+}
+
+TARGET=""
+TFLAG="-T3"
+for arg in "$@"; do
+    case "$arg" in
+        -T1|-T2|-T3|-T4|-T5) TFLAG="$arg" ;;
+        -h|--help) usage; exit 0 ;;
+        *) TARGET="$arg" ;;
+    esac
+done
+
+if [ -z "$TARGET" ]; then
+    usage
+    exit 1
+fi
+
+case "$TFLAG" in
+    -T1) TOTAL_SECONDS=120 ;;
+    -T2) TOTAL_SECONDS=300 ;;
+    -T3) TOTAL_SECONDS=600 ;;
+    -T4) TOTAL_SECONDS=3600 ;;
+    -T5) TOTAL_SECONDS=7200 ;;
+esac
+PHASE_SECONDS=$((TOTAL_SECONDS / 3))
+
+# feroxbuster/katana require a full URL with scheme, and fail instantly and
+# silently otherwise. Don't assume http:// — most real sites are https-only
+# or redirect http->https, so detect it instead of guessing.
+RAW_TARGET="$TARGET"
+BASE_DIR="./sourcepuller"
+
+for bin in feroxbuster katana httrack curl; do
+    if ! command -v "$bin" >/dev/null 2>&1; then
+        echo "[!] Missing dependency: $bin (not on PATH)"
+        exit 1
+    fi
+done
+
+if [[ ! "$TARGET" =~ ^https?:// ]]; then
+    if curl -sI --max-time 6 "https://$TARGET" >/dev/null 2>&1; then
+        TARGET="https://$TARGET"
+    elif curl -sI --max-time 6 "http://$TARGET" >/dev/null 2>&1; then
+        TARGET="http://$TARGET"
+    else
+        echo "[!] Could not reach $RAW_TARGET over https or http."
+        echo "[!] Check DNS/VPN, or pass the full URL with scheme yourself."
+        exit 1
+    fi
+fi
+DOMAIN=$(echo "$TARGET" | sed -E 's|https?://([^/]+).*|\1|')
+OUTPUT_DIR="$BASE_DIR/$DOMAIN"
+
+echo "[+] SourcePuller v15 starting for $TARGET"
+echo "[+] Time budget: $TFLAG = ${TOTAL_SECONDS}s total, ${PHASE_SECONDS}s per phase"
+
+mkdir -p "$OUTPUT_DIR"/{full-mirror,urls,logs}
+
+CHILD_PID=""
+cleanup() {
+    echo -e "\n\n[+] Stopped by user."
+    [ -n "$CHILD_PID" ] && kill -KILL "$CHILD_PID" 2>/dev/null
+    echo "[+] Partial results saved in $OUTPUT_DIR"
+    exit 0
+}
+trap cleanup INT TERM
+
+# Run a command in the background. Show a live countdown of the phase's
+# time slice. If the command finishes early, move on immediately. If the
+# time slice runs out first, send SIGINT (graceful stop, same as manual
+# Ctrl+C) then SIGKILL after a short grace period if it's still alive.
+run_phase_timed() {
+    local label=$1 budget=$2 logfile=$3
+    shift 3
+    "$@" </dev/null >/dev/null 2>"$logfile" &
+    CHILD_PID=$!
+
+    local remaining=$budget
+    while kill -0 "$CHILD_PID" 2>/dev/null && [ "$remaining" -gt 0 ]; do
+        printf "\r[%s] time left: %02d:%02d   " "$label" $((remaining / 60)) $((remaining % 60))
+        sleep 1
+        remaining=$((remaining - 1))
+    done
+
+    if kill -0 "$CHILD_PID" 2>/dev/null; then
+        printf "\r[%s] time budget used — stopping (saving partial results)...   \n" "$label"
+        kill -INT "$CHILD_PID" 2>/dev/null
+        local grace=5
+        while [ "$grace" -gt 0 ] && kill -0 "$CHILD_PID" 2>/dev/null; do
+            sleep 1
+            grace=$((grace - 1))
+        done
+        kill -KILL "$CHILD_PID" 2>/dev/null
+    fi
+
+    wait "$CHILD_PID" 2>/dev/null
+    local status=$?
+    CHILD_PID=""
+    local used=$((budget - (remaining > 0 ? remaining : 0)))
+    printf "\r[%s] done (%02d:%02d used)                              \n" "$label" $((used / 60)) $((used % 60))
+    return $status
+}
+
+WORDLIST=""
+for candidate in \
+    /usr/share/seclists/Discovery/Web-Content/common.txt \
+    /usr/share/wordlists/seclists/Discovery/Web-Content/common.txt \
+    /usr/share/wordlists/dirb/common.txt
+do
+    if [ -f "$candidate" ]; then
+        WORDLIST="$candidate"
+        break
+    fi
+done
+if [ -z "$WORDLIST" ]; then
+    echo "[!] No content-discovery wordlist found (checked seclists/dirb common paths)."
+    echo "[!] Install seclists, or edit WORDLIST in the script to point at one."
+    exit 1
+fi
+
+echo "[+] Phase 1/3: Feroxbuster"
+run_phase_timed "Feroxbuster" "$PHASE_SECONDS" "$OUTPUT_DIR/logs/ferox.log" \
+    feroxbuster -u "$TARGET" \
+        -w "$WORDLIST" \
+        -x php,html,js,txt,env,bak,config \
+        -s 200,301,302,307,308 \
+        --rate-limit 60 --timeout 10 --no-state --silent \
+        -o "$OUTPUT_DIR/urls/ferox.txt"
+FEROX_STATUS=$?
+
+echo "[+] Phase 2/3: Katana"
+run_phase_timed "Katana" "$PHASE_SECONDS" "$OUTPUT_DIR/logs/katana.log" \
+    katana -u "$TARGET" -d 6 -jc -aff --silent \
+        -o "$OUTPUT_DIR/urls/katana.txt"
+KATANA_STATUS=$?
+
+cat "$OUTPUT_DIR/urls/ferox.txt" "$OUTPUT_DIR/urls/katana.txt" 2>/dev/null | sort -u > "$OUTPUT_DIR/urls/all.txt"
+
+echo "[+] Phase 3/3: HTTrack (downloading source)"
+HTTRACK_CMD=(httrack "$TARGET" -O "$OUTPUT_DIR/full-mirror"
+    --mirror --depth=7 --ext-depth=3
+    --user-agent="Mozilla/5.0" --timeout=30 -q)
+if [ -d "$OUTPUT_DIR/full-mirror/hts-cache" ]; then
+    HTTRACK_CMD+=(--continue)
+fi
+run_phase_timed "HTTrack" "$PHASE_SECONDS" "$OUTPUT_DIR/logs/httrack.log" "${HTTRACK_CMD[@]}"
+HTTRACK_STATUS=$?
+
+echo ""
+for pair in "Feroxbuster:$FEROX_STATUS" "Katana:$KATANA_STATUS" "HTTrack:$HTTRACK_STATUS"; do
+    name="${pair%%:*}"
+    code="${pair##*:}"
+    # 130 = SIGINT (expected/normal when the time budget cut a phase off)
+    if [ "$code" -ne 0 ] && [ "$code" -ne 130 ]; then
+        echo "[!] $name exited with status $code — check $OUTPUT_DIR/logs/"
+    fi
+done
+
+echo "[+] COMPLETE (within ${TOTAL_SECONDS}s budget)."
+echo "[+] Full source ready in: $OUTPUT_DIR/full-mirror"
+echo "[+] All discovered URLs: $OUTPUT_DIR/urls/all.txt"
+echo "[+] Bearer command: bearer scan $OUTPUT_DIR/full-mirror"
