@@ -5,6 +5,13 @@ source code as it can, and runs it through vulnerability-scanning tools — with
 the long-term goal of an AI layer that turns raw scanner noise into a precise,
 human-readable "here's exactly how to exploit this" report.**
 
+<img width="639" height="267" alt="image" src="https://github.com/user-attachments/assets/4fc1b84c-fa75-4375-8db4-c415cf1acf7c" />
+
+<img width="626" height="246" alt="image" src="https://github.com/user-attachments/assets/7799b73d-f174-4610-81dc-5509e55964ff" />
+
+<img width="695" height="366" alt="image" src="https://github.com/user-attachments/assets/25360bd2-30b5-413b-be8f-3ff7f02f8540" />
+
+
 ## Why this exists
 
 If you've ever run a handful of recon/scanning tools against a target — Nikto,
