@@ -1,10 +1,16 @@
-# crawl-hunt
+# spider-sast
 
 An automated security pipeline that enumerates a target web application, mirrors discoverable source pages and assets, and runs static application security testing (SAST) to identify code-level vulnerabilities, software bugs, and potential CVEs.
 
+<img width="639" height="267" alt="image" src="https://github.com/user-attachments/assets/4fc1b84c-fa75-4375-8db4-c415cf1acf7c" />
+
+<img width="626" height="246" alt="image" src="https://github.com/user-attachments/assets/7799b73d-f174-4610-81dc-5509e55964ff" />
+
+<img width="695" height="366" alt="image" src="https://github.com/user-attachments/assets/25360bd2-30b5-413b-be8f-3ff7f02f8540" />
+
 ## Overview
 
-Scanning web applications often creates an overwhelming amount of raw output across multiple tools without clear correlation between endpoints and source code. **crawl-hunt** addresses this by bridging content discovery, local asset mirroring, and static code analysis into a streamlined workflow to pinpoint actionable security flaws.
+Scanning web applications often creates an overwhelming amount of raw output across multiple tools without clear correlation between endpoints and source code. **spider-sast** addresses this by bridging content discovery, local asset mirroring, and static code analysis into a streamlined workflow to pinpoint actionable security flaws.
 
 ## Pipeline Architecture
 
