@@ -1,4 +1,4 @@
-# crawl-hunt
+# spider-sast
 
 **An open-source pipeline that crawls a web target, pulls down as much of its
 source code as it can, and runs it through vulnerability-scanning tools — with
