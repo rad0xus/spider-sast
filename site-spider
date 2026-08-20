@@ -1,9 +1,9 @@
 #!/bin/bash
-# SourcePuller v15 - dynamic scheme detection, hard time budget, real countdown
+# spider-sast - dynamic scheme detection, hard time budget, real countdown
 
 usage() {
     cat <<'USAGE'
-Usage: sourcepuller <target> -T<1-5>
+Usage: spider-sast <target> -T<1-5>
 
   -T1   2 min total   (~40 sec/phase)
   -T2   5 min total   (~100 sec/phase)
@@ -46,7 +46,7 @@ PHASE_SECONDS=$((TOTAL_SECONDS / 3))
 # silently otherwise. Don't assume http:// — most real sites are https-only
 # or redirect http->https, so detect it instead of guessing.
 RAW_TARGET="$TARGET"
-BASE_DIR="./sourcepuller"
+BASE_DIR="./spider-sast"
 
 for bin in feroxbuster katana httrack curl; do
     if ! command -v "$bin" >/dev/null 2>&1; then
@@ -69,7 +69,7 @@ fi
 DOMAIN=$(echo "$TARGET" | sed -E 's|https?://([^/]+).*|\1|')
 OUTPUT_DIR="$BASE_DIR/$DOMAIN"
 
-echo "[+] SourcePuller v15 starting for $TARGET"
+echo "[+] spider-sast starting for $TARGET"
 echo "[+] Time budget: $TFLAG = ${TOTAL_SECONDS}s total, ${PHASE_SECONDS}s per phase"
 
 mkdir -p "$OUTPUT_DIR"/{full-mirror,urls,logs}
@@ -115,7 +115,7 @@ run_phase_timed() {
     local status=$?
     CHILD_PID=""
     local used=$((budget - (remaining > 0 ? remaining : 0)))
-    printf "\r[%s] done (%02d:%02d used)                              \n" "$label" $((used / 60)) $((used % 60))
+    printf "\r[%s] done (%02d:%02d used)                               \n" "$label" $((used / 60)) $((used % 60))
     return $status
 }
 
