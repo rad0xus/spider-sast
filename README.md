@@ -1,122 +1,46 @@
-# spider-sast
-
-**An open-source pipeline that crawls a web target, pulls down as much of its
-source code as it can, and runs it through vulnerability-scanning tools — with
-the long-term goal of an AI layer that turns raw scanner noise into a precise,
-human-readable "here's exactly how to exploit this" report.**
-
-<img width="639" height="267" alt="image" src="https://github.com/user-attachments/assets/4fc1b84c-fa75-4375-8db4-c415cf1acf7c" />
-
-<img width="626" height="246" alt="image" src="https://github.com/user-attachments/assets/7799b73d-f174-4610-81dc-5509e55964ff" />
-
-<img width="695" height="366" alt="image" src="https://github.com/user-attachments/assets/25360bd2-30b5-413b-be8f-3ff7f02f8540" />
-
-
-## Why this exists
-
-If you've ever run a handful of recon/scanning tools against a target — Nikto,
-Feroxbuster, Katana, a SAST scanner, linpeas on a box you've already landed on
-— you know the real bottleneck isn't finding signal, it's **finding the signal
-inside the noise**. Each tool speaks its own format, none of them know about
-each other's findings, and a raw dump of any single tool's output is usually
-too long and unstructured for even an experienced person (or an LLM handed the
-whole file) to reliably act on. A DAST tool might flag a suspicious parameter;
-a SAST tool might flag a dangerous function; almost nothing available for free
-today automatically connects those two dots and shows you the specific line
-of code behind the specific exploitable endpoint.
-
-That gap — turning "20 tools' worth of loosely related output" into "here is
-the one thing to try, and here's why" — is what crawl-hunt is trying to close,
-starting with the web-application slice of that problem (not post-exploitation
-/ privesc parsing, at least not yet).
-
-This is explicitly a **community tool**. Nobody has deep expertise in every
-open-source scanner out there, so the intent is to keep the pipeline modular
-enough that anyone can drop in support for a new tool via pull request. See
-[CONTRIBUTING.md](CONTRIBUTING.md).
-
-## Current status
-
-The only working piece today is **`site-spider`**, a 3-phase recon/mirroring
-pipeline:
-
-| Phase | Tool | Purpose |
-|---|---|---|
-| 1 | [Feroxbuster](https://github.com/epi052/feroxbuster) | content/directory discovery |
-| 2 | [Katana](https://github.com/projectdiscovery/katana) | JS-aware crawling |
-| 3 | [HTTrack](https://www.httrack.com/) | full source mirror of what was found |
-
-Features as of now:
-- Auto-detects `https://` vs `http://` for a bare hostname instead of assuming one
-- Hard time budget via `-T1`..`-T5` (2/5/10/60/120 min total, split evenly across
-  the 3 phases) with a live countdown — each phase is cut off gracefully
-  (`SIGINT`, so tools flush partial results) rather than run indefinitely
-- Dependency and wordlist path checks up front, so failures are loud and
-  immediate instead of silent
-- Works against any target, not one specific site — validated against both an
-  HTTPS real-world domain and an HTTP-only lab target
-
-Usage:
-```
-chmod +x site-spider
-sourcepuller-style usage:
-  site-spider <target> [-T1|-T2|-T3|-T4|-T5]
-```
-
-See [worklog.md](worklog.md) for the detailed history of how it got here,
-including bugs found and fixed.
-
-## Where this is going
-
-The full intended pipeline, in order:
-
-1. **Enumeration** — thorough recon before anything else. Rule of thumb: never
-   rely on a single tool for enumeration, since each one has blind spots.
-   Feroxbuster + Katana today; Nikto and/or Nuclei planned as additional
-   enumeration passes (Nikto's header/config/known-vuln checks and Nuclei's
-   template-based checks catch different things than a pure content-discovery
-   crawler does).
-2. **Source acquisition** — pull down source only from endpoints that actually
-   returned something (2xx/3xx), not from paths that 404'd. HTTrack today;
-   may be supplemented with targeted `curl` pulls for endpoints the mirror
-   missed.
-3. **Static analysis (SAST)** — [Bearer](https://github.com/Bearer/bearer) is
-   the current tool, but **it does not support PHP** (its language coverage is
-   JS/TS, Ruby, Java, Go, and Python) — a real gap, since PHP is extremely
-   common on the kind of targets this tool is meant for. Planned additions:
-   [Semgrep](https://semgrep.dev/) (broadest language coverage of any open
-   SAST tool, PHP included, same `file:line` output contract as Bearer) and/or
-   PHP-specific tools like Progpilot or PHPStan with security rules.
-4. **Dynamic analysis (DAST)** — running scanners against the *live* target,
-   not just its source. Nikto already found a plausible LFI pattern in manual
-   testing; [Nuclei](https://github.com/projectdiscovery/nuclei) is the
-   planned addition here since it shares an ecosystem with Katana and accepts
-   URL lists directly from the enumeration phase.
-5. **Correlation layer** — normalizing and cross-referencing findings from all
-   of the above into one structured record (`{tool, finding, file, line,
-   endpoint, evidence}`) instead of a pile of separate text/log files. Rather
-   than build this from scratch, the plan is to lean on existing open-source
-   tooling built exactly for this (e.g.
-   [DefectDojo](https://github.com/DefectDojo/django-DefectDojo) or
-   [Faraday](https://github.com/infobyte/faraday)) rather than reinvent
-   finding-deduplication.
-6. **AI reasoning layer** — once findings are structured and correlated, the
-   plan is to point an agent (currently looking at
-   [Antigravity](https://antigravity.google/)) at the full saved result set —
-   mirrored source, enumeration output, SAST/DAST findings — and have it
-   produce a precise, step-by-step "this is exploitable, here's exactly how"
-   report. The key design constraint here: the agent should only ever be
-   handed *narrow, structured, pre-correlated* context, never a raw dump of
-   every tool's full output — that's what makes the difference between a
-   useful answer and a confused one.
-
-## Contributing
-
-Contributions are very welcome, especially:
-- Wiring in new enumeration/SAST/DAST tools as additional pipeline phases
-- Improving correlation logic between DAST findings and source-code locations
-- Anything that makes the eventual AI-layer input more structured and precise
-
-See [CONTRIBUTING.md](CONTRIBUTING.md) for how the pipeline is structured and
-how to submit a new tool integration.
 # crawl-hunt
+
+An automated security pipeline that enumerates a target web application, mirrors discoverable source pages and assets, and runs static application security testing (SAST) to identify code-level vulnerabilities, software bugs, and potential CVEs.
+
+## Overview
+
+Scanning web applications often creates an overwhelming amount of raw output across multiple tools without clear correlation between endpoints and source code. **crawl-hunt** addresses this by bridging content discovery, local asset mirroring, and static code analysis into a streamlined workflow to pinpoint actionable security flaws.
+
+## Pipeline Architecture
+
+1. **Enumeration & Discovery**
+Discovers accessible paths, hidden directories, and endpoints using complementary crawlers (e.g., Feroxbuster, Katana).
+2. **Source & Asset Mirroring**
+Downloads client-accessible source files, JavaScript bundles, and page assets (e.g., via HTTrack or targeted pulls) strictly for endpoints that return valid responses (2xx/3xx).
+3. **Static Analysis (SAST)**
+Executes static security scanners (e.g., Semgrep, Bearer) over the mirrored codebase to flag vulnerable functions, insecure configurations, and potential CVE matches tied to specific files and line numbers.
+
+## Current Status
+
+The primary active module is **`site-spider`**, which handles the initial 3-phase enumeration and mirroring pipeline:
+
+| Phase | Tool | Function |
+| --- | --- | --- |
+| 1 | [Feroxbuster](https://github.com/epi052/feroxbuster) | Directory and content discovery |
+| 2 | [Katana](https://github.com/projectdiscovery/katana) | JavaScript-aware web crawling |
+| 3 | [HTTrack](https://www.httrack.com/) | Full source and asset mirroring of discovered paths |
+
+### Key Features
+
+* **Protocol Auto-Detection:** Determines whether to use `https://` or `http://` for bare hostnames.
+* **Time Budget Controls:** Enforces configurable execution limits (`-T1` through `-T5`) split across pipeline phases with graceful process termination (`SIGINT`) to preserve partial output.
+* **Dependency Validation:** Verifies tool binaries and wordlists before launch to prevent late-stage silent failures.
+
+## Usage
+
+```bash
+chmod +x site-spider
+./site-spider <target> [-T1|-T2|-T3|-T4|-T5]
+
+```
+
+## Planned Enhancements
+
+* **Broader SAST Language Coverage:** Integration of Semgrep and PHP-focused analyzers (e.g., Progpilot) to support server-side script analysis.
+* **CVE & Vulnerability Mapping:** Cross-referencing identified code patterns and third-party dependencies against known CVE databases.
+* **Output Normalization:** Consolidating scanner outputs into a unified structured report (`{tool, finding, file, line, cve_id}`).
