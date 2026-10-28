@@ -45,8 +45,3 @@ chmod +x site-spider
 
 ```
 
-## Planned Enhancements
-
-* **Broader SAST Language Coverage:** Integration of Semgrep and PHP-focused analyzers (e.g., Progpilot) to support server-side script analysis.
-* **CVE & Vulnerability Mapping:** Cross-referencing identified code patterns and third-party dependencies against known CVE databases.
-* **Output Normalization:** Consolidating scanner outputs into a unified structured report (`{tool, finding, file, line, cve_id}`).
